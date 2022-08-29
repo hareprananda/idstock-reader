@@ -1,375 +1,161 @@
-import readXlsxFile, { readSheetNames } from "read-excel-file/node";
-import { IExcelFinancialReport } from "./model";
+import readXlsxFile, { readSheetNames } from 'read-excel-file/node'
+import humps from 'humps'
 
-function ReadFinancialExcel({ path }: { path: string }) {
-  let sektor = "";
-  let subsektor = "";
-  let intInitialPeriod = "";
-  const periode3BulanInteger = 7680000000;
-  const sheet = {
-    general: 2,
-    balance: 3,
-    income: 4,
-    priorYear1: 5,
-    cashflow: 7,
-  };
-  function getSheet() {
-    // return readSheetNames(fs.createReadStream)
-    return readSheetNames(path).then((sheetNames) => {
-      return sheetNames.map((sheetName) => ({ name: sheetName }));
-    });
+const sheetIndex = {
+  GENERAL: 2,
+  BALANCE: 3,
+  INCOME: 4,
+  CURRENTCHANGESTATEMENT: 5,
+  PREVIOUSCHANGESTATEMENT: 6,
+  CASHFLOW: 7,
+} as const
+
+class ReadFinancial {
+  private path: string
+  private lang: 'en' | 'id'
+
+  constructor(option: { path: string; language: 'en' | 'id' }) {
+    this.path = option.path
+    this.lang = option.language
   }
 
-  async function getRows() {
-    const kembali = await readXlsxFile(path, {
-      sheet: sheet.cashflow,
-    }).then((rows: any) => {
-      return rows;
-    });
-    return kembali;
-  }
-
-  async function getData() {
-    const general = await fetchUmum();
-    const balance =
-      sektor === "Finance" ? await fetchBalanceFinance() : await fetchBalance();
-    const income =
-      sektor === "Finance" ? await fetchIncomeFinance() : await fetchIncome();
-    const cashflow = await fetchCashFlow();
-    const priorYear = await priorYearData();
-    // const income = {}
-
+  async getFullReport() {
     return {
-      sektor,
-      subsektor,
-      ...general,
-      ...income,
-      ...cashflow,
-      ...balance,
-      ...priorYear,
-    } as unknown as IExcelFinancialReport;
+      general: await this.getGeneral(),
+      balance: await this.getBalance(),
+      income: await this.getIncome(),
+      cashflow: await this.getCashflow(),
+      changeStatement: await this.getChangeStatement(),
+    }
   }
 
-  async function fetchUmum() {
-    let jason: any[] = [];
-    await readXlsxFile(path, { sheet: sheet.general }).then((rows: any) => {
-      rows.forEach((row: any) => {
-        if (row[0] === null) {
-          return;
-        }
-        if (row[0] != null && row[0].match(/Kode entitas/g)) {
-          const mantap: any = [];
-          mantap.ticker = row[1] === null ? 0 : row[1];
-          jason = { ...jason, ...mantap };
-        } else if (row[0] === "Sektor") {
-          sektor = row[1].slice(3);
-        } else if (row[0] === "Subsektor") {
-          subsektor = row[1].slice(4);
-        } else if (row[0].match(/(?=.*\bPembulatan yang digunakan\b).*$/g)) {
-          const newElement: any = [];
-          newElement.multiply = row[1].match(/(?=.*\bSatuan Penuh\b).*$/g)
-            ? 1
-            : row[1].match(/(?=.*\bRibuan\b).*$/g)
-            ? 3
-            : row[1].match(/(?=.*\bJutaan\b).*$/g)
-            ? 6
-            : 9;
-          jason = { ...jason, ...newElement };
-        } else if (row[0] === "Mata uang pelaporan") {
-          const newElement: any = [];
-          newElement.currency = row[1].match(/(?=.*\bIDR\b).*$/g)
-            ? "IDR"
-            : "USD";
-          jason = { ...jason, ...newElement };
-        } else if (row[0] === "Tanggal awal periode berjalan") {
-          intInitialPeriod = new Date(row[1]).getTime().toString();
-        } else if (row[0] === "Tanggal akhir periode berjalan") {
-          const newElement: any = [];
-          const month = new Date(row[1]).getMonth() + 1;
-          newElement.tahun = new Date(row[1]).getFullYear();
-          const akhirPeriode = new Date(row[1]).getTime();
-          const jarakWaktu = akhirPeriode - parseInt(intInitialPeriod, 10);
-          newElement.periode = Math.round(jarakWaktu / periode3BulanInteger);
-          if (newElement.periode === 4 && month <= 3) {
-            --newElement.tahun;
-          }
-          jason = { ...jason, ...newElement };
-        }
-      });
-    });
-    return { general: jason };
+  getSheets() {
+    return readSheetNames(this.path).then((sheetNames) => {
+      return sheetNames.map((sheetName) => ({ name: sheetName }))
+    })
   }
-  async function fetchCashFlow() {
-    let jason: any = [];
 
-    await readXlsxFile(path, { sheet: sheet.cashflow }).then((rows: any) => {
-      rows.forEach((row: any) => {
-        if (
-          row[0] != null &&
-          (row[0].match(
-            /(?=.*\bJumlah\b)(?=.*\bkas\b)(?=.*\bbersih\b)(?=.*\boperasi\b).*$/g
-          ) ||
-            row[0].match(
-              /(?=.*\bJumlah\b)(?=.*\bkas\b)(?=.*\bbersih\b)(?=.*\binvestasi\b).*$/g
-            ) ||
-            row[0].match(
-              /(?=.*\bJumlah\b)(?=.*\bkas\b)(?=.*\bbersih\b)(?=.*\bpendanaan\b).*$/g
-            ) ||
-            row[0].match(
-              /(?=.*\bJumlah\b)(?=.*\bkenaikan\b)(?=.*\bsetara kas\b).*$/g
-            ) ||
-            row[0].match(
-              /(?=.*\bKas\b)(?=.*\bsetara kas\b)(?=.*\bawal periode\b).*$/g
-            ) ||
-            row[0].match(
-              /(?=.*\bKas\b)(?=.*\bsetara kas\b)(?=.*\bakhir periode\b).*$/g
-            ))
-        ) {
-          row[0] = row[0].match(
-            /(?=.*\bJumlah\b)(?=.*\bkas\b)(?=.*\bbersih\b)(?=.*\boperasi\b).*$/g
-          )
-            ? "OperatingCash"
-            : row[0].match(
-                /(?=.*\bJumlah\b)(?=.*\bkas\b)(?=.*\bbersih\b)(?=.*\binvestasi\b).*$/g
-              )
-            ? "InvestingCash"
-            : row[0].match(
-                /(?=.*\bJumlah\b)(?=.*\bkas\b)(?=.*\bbersih\b)(?=.*\bpendanaan\b).*$/g
-              )
-            ? "FinancingCash"
-            : row[0];
-
-          const mantap = [];
-          mantap[row[0]] = row[1] === null ? 0 : row[1];
-          jason = { ...jason, ...mantap };
-        }
-      });
-    });
-    return { cashflow: jason };
+  getRows(sheetType: keyof typeof sheetIndex) {
+    return readXlsxFile(this.path, {
+      sheet: sheetIndex[sheetType],
+    }).then((rows) => {
+      return rows
+    })
   }
-  async function fetchBalance() {
-    let jason: any = [];
 
-    await readXlsxFile(path, { sheet: sheet.balance }).then((rows: any) => {
-      rows.forEach((row: any) => {
-        if (
-          row[0] != null &&
-          (row[0].match(/(?=.*\bJumlah aset\b)(?=.*\blancar\b).*$/g) ||
-            row[0] === "Jumlah aset" ||
-            row[0].match(/(?=.*\bJumlah liabilitas jangka\b).*$/g) ||
-            row[0] === "Jumlah liabilitas" ||
-            row[0] === "Jumlah ekuitas" ||
-            row[0].match(/(?=.*\bdimuka\b).*$/g) ||
-            row[0].match(/(?=.*\bPersediaan\b).*$/g))
-        ) {
-          const mantap = [];
-          mantap[row[0]] = row[1] === null ? 0 : row[1];
-          jason = { ...jason, ...mantap };
-        }
-      });
-    });
+  async getGeneral() {
+    const generalData: Record<string, string | number> = {}
+    const rows = await readXlsxFile(this.path, { sheet: sheetIndex.GENERAL })
 
-    const filteredPersediaan = Object.keys(jason)
-      .filter((key) => key.match(/(?=.*\bPersediaan\b).*$/g))
-      .reduce((obj: any, key) => {
-        obj[key] = jason[key];
-        return obj;
-      }, {});
-
-    const kolomJumlahAsetLancar = Object.keys(jason).filter((key) =>
-      key.match(/(?=.*\bJumlah aset\b)(?=.*\blancar\b).*$/g)
-    );
-    if (kolomJumlahAsetLancar.length < 1) {
-      jason["Jumlah aset lancar"] = jason["Jumlah aset"];
-      jason["Jumlah aset tidak lancar"] = 0;
+    for (const row of rows) {
+      if (!row[0] || !row[1] || !row[2]) continue
+      const descIndex = this.lang === 'en' ? 2 : 0
+      generalData[humps.camelize(row[descIndex].toString())] = row[1]?.toString()
     }
 
-    const kolomLiabilitasJangka = Object.keys(jason).filter((key) =>
-      key.match(/(?=.*\bJumlah liabilitas jangka\b).*$/g)
-    );
-    if (kolomLiabilitasJangka.length < 1) {
-      jason["Jumlah liabilitas jangka pendek"] = jason["Jumlah liabilitas"];
-      jason["Jumlah liabilitas jangka panjang"] = 0;
-    }
-    const filteredBiayadiMuka = Object.keys(jason)
-      .filter((key) => key.match(/(?=.*\bdimuka\b).*$/g))
-      .reduce((obj: any, key) => {
-        obj[key] = jason[key];
-        return obj;
-      }, {});
-
-    const totalPersediaan = Object.values(filteredPersediaan).reduce(
-      (total: any, nilai) => total + nilai,
-      0
-    );
-
-    jason["Total jumlah persediaan"] = totalPersediaan;
-
-    const totalBiayaDiMuka = Object.values(filteredBiayadiMuka).reduce(
-      (total: any, nilai) => total + nilai,
-      0
-    );
-    jason["Total biaya dimuka"] = totalBiayaDiMuka; // masih tanda tanya
-
-    return { balance: jason };
+    return generalData
   }
-  async function fetchIncome() {
-    let jason: any = [];
 
-    await readXlsxFile(path, { sheet: sheet.income }).then((rows: any) => {
-      rows.forEach((row: any) => {
-        if (
-          row[0] != null &&
-          (row[3] === "Sales and revenue" ||
-            row[3] === "Total profit (loss)" ||
-            row[3] === "Tax benefit (expenses)")
-        ) {
-          const mantap = [];
-          mantap[row[0]] = row[1] === null ? 0 : row[1];
-          jason = { ...jason, ...mantap };
+  async getBalance() {
+    const balanceData: Record<string, Record<'previous' | 'current', number>> = {}
+    const rows = await readXlsxFile(this.path, { sheet: sheetIndex.BALANCE })
+    const langIdx = this.lang === 'en' ? 3 : 0
+    for (const row of rows.slice(4)) {
+      if (!row[0] || !row[1] || !row[2] || !row[3]) continue
+
+      balanceData[humps.camelize(row[langIdx].toString())] = {
+        previous: parseInt(row[2].toString()),
+        current: parseInt(row[1].toString()),
+      }
+    }
+    return balanceData
+  }
+
+  async getIncome() {
+    const incomeData: Record<string, Record<'previous' | 'current', number>> = {}
+    const rows = await readXlsxFile(this.path, { sheet: sheetIndex.INCOME })
+    const langIdx = this.lang === 'en' ? 3 : 0
+    for (const row of rows.slice(4)) {
+      if (!row[0] || !row[1] || !row[2] || !row[3]) continue
+
+      incomeData[humps.camelize(row[langIdx].toString())] = {
+        previous: parseInt(row[2].toString()),
+        current: parseInt(row[1].toString()),
+      }
+    }
+    return incomeData
+  }
+
+  async getCashflow() {
+    const cashflowData: Record<string, Record<'previous' | 'current', number>> = {}
+    const rows = await readXlsxFile(this.path, { sheet: sheetIndex.CASHFLOW })
+    const langIdx = this.lang === 'en' ? 3 : 0
+    for (const row of rows.slice(4)) {
+      if (!row[0] || !row[1] || !row[2] || !row[3]) continue
+
+      cashflowData[humps.camelize(row[langIdx].toString())] = {
+        previous: parseInt(row[2].toString()),
+        current: parseInt(row[1].toString()),
+      }
+    }
+    return cashflowData
+  }
+
+  async getChangeStatement() {
+    const changeStatementData: Record<string, Record<string, Record<'previous' | 'current', number>>> = {}
+    const previousRows = await readXlsxFile(this.path, { sheet: sheetIndex.PREVIOUSCHANGESTATEMENT })
+    const langIdx = this.lang === 'en' ? 6 : 5
+    if (this.lang === 'id') previousRows.splice(langIdx + 1, 1)
+    const prevKeys: string[] = []
+    for (const [rowIdx, previousRow] of previousRows.slice(langIdx).entries()) {
+      let desc = humps.camelize(previousRow[0]?.toString() || '')
+      if (this.lang === 'en') desc = humps.camelize(previousRow[previousRow.length - 1]?.toString() || '')
+
+      for (const [colIdx, column] of previousRow.entries()) {
+        if (rowIdx === 0) {
+          prevKeys[colIdx] = humps.camelize(column?.toString() || '')
+          continue
         }
-      });
-    });
-    return { income: jason };
-  }
-  async function fetchIncomeFinance() {
-    let jason: any = [];
 
-    if (subsektor !== "B") {
-      await readXlsxFile(path, { sheet: sheet.income }).then((rows: any) => {
-        rows.forEach((row: any) => {
-          if (row[0] != null) {
-            if (
-              row[0] === "Pendapatan (beban) pajak" ||
-              row[0] === "Jumlah laba (rugi)"
-            ) {
-              const mantap: any = [];
-              mantap[row[0]] = row[1] === null ? 0 : row[1];
-              jason = { ...jason, ...mantap };
-            } else if (
-              row[0].match(/(?=.*\bPendapatan\b).*$/g) ||
-              row[0] === "Penjualan dan pendapatan usaha"
-            ) {
-              const mantap: any = [];
-              const previousValue =
-                jason["Penjualan dan pendapatan usaha"] === undefined
-                  ? 0
-                  : jason["Penjualan dan pendapatan usaha"];
-              mantap["Penjualan dan pendapatan usaha"] = previousValue + row[1];
-              jason = { ...jason, ...mantap };
-            }
-          }
-        });
-      });
-    }
+        if (!column || prevKeys[colIdx] === '' || colIdx === 0) continue
 
-    return { income: jason };
-  }
-  async function fetchBalanceFinance() {
-    let jason: any = [];
-    let giroLiabilitasSection = false;
-    if (subsektor !== "B") {
-      await readXlsxFile(path, { sheet: sheet.balance }).then((rows: any) => {
-        rows.forEach((row: any) => {
-          if (row[0] != null) {
-            if (
-              row[0].match(/(?=.*\bTabungan\b).*$/g) ||
-              row[0] === "Jumlah ekuitas" ||
-              row[0] === "Kas" ||
-              row[0].match(/(?=.*\bCadangan kerugian penurunan nilai\b).*$/g) ||
-              row[0].match(/(?=.*\bDeposito\b).*$/g)
-            ) {
-              const mantap: any = [];
-              mantap[row[0]] = row[1] === null ? 0 : row[1];
-              jason = { ...jason, ...mantap };
-            } else if (row[0] === "Liabilitas") {
-              giroLiabilitasSection = true;
-            } else if (row[0].match(/(?=.*\bGiro\b).*$/g)) {
-              const mantap: any = [];
-              const keterangan =
-                giroLiabilitasSection === false ? "asset" : "liabilitas";
-              mantap[`${row[0]} ${keterangan}`] = row[1] === null ? 0 : row[1];
-              jason = { ...jason, ...mantap };
-            } else if (row[0] === "Aset tetap") {
-              const mantap: any = [];
-              mantap["Jumlah aset tidak lancar"] = row[1];
-              jason = { ...jason, ...mantap };
-            } else if (row[0] === "Jumlah aset") {
-              const mantap: any = [];
-              mantap["Jumlah aset lancar"] =
-                row[1] - jason["Jumlah aset tidak lancar"];
-              jason = { ...jason, ...mantap };
-            } else if (row[0].match(/(?=.*\bdimuka\b).*$/g)) {
-              const mantap: any = [];
-              const previousPrice =
-                jason["Total biaya dimuka"] === undefined
-                  ? 0
-                  : jason["Total biaya dimuka"];
-              mantap["Total biaya dimuka"] = previousPrice + row[1];
-              jason = { ...jason, ...mantap };
-            } else if (row[0] === "Jumlah liabilitas") {
-              const mantap: any = [];
-              mantap["Jumlah liabilitas jangka pendek"] = row[1];
-              mantap["Jumlah liabilitas jangka panjang"] = 0;
-              jason = { ...jason, ...mantap };
-            }
-          }
-        });
-      });
-      // //tabungan
-      // const tabungan = Object.values(Object.keys(jason).filter(key => key.match(/(?=.*\bTabungan\b).*$/g)).reduce((obj,key) => {
-      //     obj[key] = jason[key];
-      //     return obj
-      // },{})).reduce((total,nilai) => total+nilai);
-      // //CKPN
-      // const ckpn = Object.values(Object.keys(jason).filter(key => key.match(/(?=.*\bCadangan kerugian\b).*$/g)).reduce((obj,key) => {
-      //     obj[key] = jason[key];
-      //     return obj
-      // },{})).reduce((total,nilai) => total+nilai);
-      // const deposito = Object.values(Object.keys(jason).filter(key => key.match(/(?=.*\bDeposito\b).*$/g)).reduce((obj,key) => {
-      //     obj[key] = jason[key];
-      //     return obj
-      // },{})).reduce((total,nilai) => total+nilai);
-      // const giroAsset = Object.values(Object.keys(jason).filter(key => key.match(/(?=.*\bGiro\b)(?=.*\basset\b).*$/g)).reduce((obj,key) => {
-      //     obj[key] = jason[key];
-      //     return obj
-      // },{})).reduce((total,nilai) => total+nilai);
-      // const giroLiabilitas = Object.values(Object.keys(jason).filter(key => key.match(/(?=.*\bGiro\b)(?=.*\bliabilitas\b).*$/g)).reduce((obj,key) => {
-      //     obj[key] = jason[key];
-      //     return obj
-      // },{})).reduce((total,nilai) => total+nilai);
-      // jason = Object.keys(jason).filter(key => !key.match(/(?=.*\bCadangan kerugian\b).*$/g) && !key.match(/(?=.*\bTabungan\b).*$/g) && !key.match(/(?=.*\bDeposito\b).*$/g) && !key.match(/(?=.*\bGiro\b).*$/g)).reduce((obj,key) => {
-      //     obj[key] = jason[key];
-      //     return obj
-      // },{});
-
-      // jason["Total tabungan"] = tabungan
-      // jason["Total CKPN"] = ckpn;
-      // jason["Total Deposito"] = deposito
-      // jason["Total Giro Asset"] = giroAsset
-      jason["Total jumlah persediaan"] = 0;
-      // jason["Total Giro Liabilitas"] = giroLiabilitas
-    }
-
-    return { balance: jason };
-  }
-  async function priorYearData() {
-    let amountOfDividend = 0;
-    await readXlsxFile(path, { sheet: sheet.priorYear1 }).then((rows: any) => {
-      for (const row of rows) {
-        if (
-          row[0] !== null &&
-          row[0].match(/(?=.*\bDistribusi dividen kas\b).*$/g)
-        ) {
-          amountOfDividend = row[20] === null ? 0 : row[20];
+        changeStatementData[prevKeys[colIdx]] = {
+          ...changeStatementData[prevKeys[colIdx]],
+          [desc]: {
+            previous: parseInt(column.toString()),
+            current: 0,
+          },
         }
       }
-    });
+    }
 
-    return { dividen: amountOfDividend };
+    const currentRows = await readXlsxFile(this.path, { sheet: sheetIndex.CURRENTCHANGESTATEMENT })
+    if (this.lang === 'id') currentRows.splice(langIdx + 1, 1)
+    const currentKeys: string[] = []
+    for (const [rowIdx, currentRow] of currentRows.slice(langIdx).entries()) {
+      let desc = humps.camelize(currentRow[0]?.toString() || '')
+      if (this.lang === 'en') desc = humps.camelize(currentRow[currentRow.length - 1]?.toString() || '')
+
+      for (const [colIdx, column] of currentRow.entries()) {
+        if (rowIdx === 0) {
+          currentKeys[colIdx] = humps.camelize(column?.toString() || '')
+          continue
+        }
+
+        if (!column || currentKeys[colIdx] === '' || colIdx === 0) continue
+
+        changeStatementData[currentKeys[colIdx]] = {
+          ...changeStatementData[currentKeys[colIdx]],
+          [desc]: {
+            previous: changeStatementData[currentKeys[colIdx]]?.[desc]?.['previous'] || 0,
+            current: parseInt(column.toString()),
+          },
+        }
+      }
+    }
+
+    return changeStatementData
   }
-
-  return { getSheet, getRows, getData };
 }
 
-export default ReadFinancialExcel;
+export default ReadFinancial
