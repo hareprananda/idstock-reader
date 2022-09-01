@@ -1,5 +1,5 @@
 import path from 'path'
-import ReadFinancial from 'reader'
+import ReadFinancial from '..'
 import fs from 'fs'
 
 describe('Reader testing', () => {
