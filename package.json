@@ -5,7 +5,11 @@
   "author": "Hare Prananda",
   "license": "MIT",
   "scripts": {
-    "test": "jest"
+    "test": "jest",
+    "build": "rollup -c",
+    "prepare": "husky install",
+    "lint": "eslint .",
+    "start": "rollup -c -w"
   },
   "devDependencies": {
     "@types/jest": "^28.1.6",
