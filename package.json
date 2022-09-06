@@ -1,6 +1,6 @@
 {
   "name": "idstock-reader",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "Hare Prananda",
   "license": "MIT",
   "main": "dist/index.cjs.js",
@@ -41,5 +41,5 @@
   },
   "lint-staged": {
     "**/*.{js,ts,tsx}": "prettier --write"
-  }  
+  }
 }
