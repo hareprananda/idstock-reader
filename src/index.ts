@@ -1,25 +1,39 @@
 import readXlsxFile, { readSheetNames } from 'read-excel-file/node'
 import humps from 'humps'
 
-const sheetIndex = {
-  GENERAL: 2,
-  BALANCE: 3,
-  INCOME: 4,
-  CURRENTCHANGESTATEMENT: 5,
-  PREVIOUSCHANGESTATEMENT: 6,
-  CASHFLOW: 7,
-} as const
-
 class ReadFinancial {
   private path: string
   private lang: 'en' | 'id'
+
+  private sheetIndex = {
+    GENERAL: 0,
+    BALANCE: 0,
+    INCOME: 0,
+    CURRENTCHANGESTATEMENT: 0,
+    PREVIOUSCHANGESTATEMENT: 0,
+    CASHFLOW: 0,
+  }
 
   constructor(option: { path: string; language: 'en' | 'id' }) {
     this.path = option.path
     this.lang = option.language
   }
 
+  private async initSheetIndex() {
+    const allSheets = await this.getSheets()
+    const generalIdx = allSheets.findIndex((v) => v.name === '1000000')
+    this.sheetIndex = {
+      GENERAL: generalIdx + 1,
+      BALANCE: generalIdx + 2,
+      INCOME: generalIdx + 3,
+      CURRENTCHANGESTATEMENT: generalIdx + 4,
+      PREVIOUSCHANGESTATEMENT: generalIdx + 5,
+      CASHFLOW: generalIdx + 6,
+    }
+  }
+
   async getFullReport() {
+    if (this.sheetIndex.GENERAL === 0) await this.initSheetIndex()
     return {
       general: await this.getGeneral(),
       balance: await this.getBalance(),
@@ -35,75 +49,82 @@ class ReadFinancial {
     })
   }
 
-  getRows(sheetType: keyof typeof sheetIndex) {
+  getRows(
+    sheetType: 'GENERAL' | 'BALANCE' | 'INCOME' | 'CURRENTCHANGESTATEMENT' | 'PREVIOUSCHANGESTATEMENT' | 'CASHFLOW'
+  ) {
     return readXlsxFile(this.path, {
-      sheet: sheetIndex[sheetType],
+      sheet: this.sheetIndex[sheetType],
     }).then((rows) => {
       return rows
     })
   }
 
   async getGeneral() {
-    const generalData: Record<string, string | number> = {}
-    const rows = await readXlsxFile(this.path, { sheet: sheetIndex.GENERAL })
+    if (this.sheetIndex.GENERAL === 0) await this.initSheetIndex()
 
+    const rows = await readXlsxFile(this.path, { sheet: this.sheetIndex.GENERAL })
+    const data: Record<string, string | number> = {}
     for (const row of rows) {
       if (!row[0] || !row[1] || !row[2]) continue
       const descIndex = this.lang === 'en' ? 2 : 0
-      generalData[humps.camelize(row[descIndex].toString())] = row[1]?.toString()
+      data[humps.camelize(row[descIndex].toString())] = row[1]?.toString()
     }
 
-    return generalData
+    return data
   }
 
   async getBalance() {
+    if (this.sheetIndex.GENERAL === 0) await this.initSheetIndex()
     const balanceData: Record<string, Record<'previous' | 'current', number>> = {}
-    const rows = await readXlsxFile(this.path, { sheet: sheetIndex.BALANCE })
+    const rows = await readXlsxFile(this.path, { sheet: this.sheetIndex.BALANCE })
     const langIdx = this.lang === 'en' ? 3 : 0
     for (const row of rows.slice(4)) {
-      if (!row[0] || !row[1] || !row[2] || !row[3]) continue
+      if (!row[0] || !row[3] || (typeof row[1] !== 'number' && typeof row[2] !== 'number')) continue
 
       balanceData[humps.camelize(row[langIdx].toString())] = {
-        previous: parseInt(row[2].toString()),
-        current: parseInt(row[1].toString()),
+        previous: row[2] ? parseInt(row[2].toString()) : 0,
+        current: row[1] ? parseInt(row[1].toString()) : 0,
       }
     }
     return balanceData
   }
 
   async getIncome() {
+    if (this.sheetIndex.GENERAL === 0) await this.initSheetIndex()
     const incomeData: Record<string, Record<'previous' | 'current', number>> = {}
-    const rows = await readXlsxFile(this.path, { sheet: sheetIndex.INCOME })
+    const rows = await readXlsxFile(this.path, { sheet: this.sheetIndex.INCOME })
     const langIdx = this.lang === 'en' ? 3 : 0
     for (const row of rows.slice(4)) {
-      if (!row[0] || !row[1] || !row[2] || !row[3]) continue
+      if (!row[0] || !row[3] || (typeof row[1] !== 'number' && typeof row[2] !== 'number')) continue
 
       incomeData[humps.camelize(row[langIdx].toString())] = {
-        previous: parseInt(row[2].toString()),
-        current: parseInt(row[1].toString()),
+        previous: row[2] ? parseInt(row[2].toString()) : 0,
+        current: row[1] ? parseInt(row[1].toString()) : 0,
       }
     }
     return incomeData
   }
 
   async getCashflow() {
+    if (this.sheetIndex.GENERAL === 0) await this.initSheetIndex()
     const cashflowData: Record<string, Record<'previous' | 'current', number>> = {}
-    const rows = await readXlsxFile(this.path, { sheet: sheetIndex.CASHFLOW })
+    const rows = await readXlsxFile(this.path, { sheet: this.sheetIndex.CASHFLOW })
     const langIdx = this.lang === 'en' ? 3 : 0
     for (const row of rows.slice(4)) {
-      if (!row[0] || !row[1] || !row[2] || !row[3]) continue
+      if (!row[0] || !row[3] || (typeof row[1] !== 'number' && typeof row[2] !== 'number')) continue
 
       cashflowData[humps.camelize(row[langIdx].toString())] = {
-        previous: parseInt(row[2].toString()),
-        current: parseInt(row[1].toString()),
+        previous: row[2] ? parseInt(row[2].toString()) : 0,
+        current: row[1] ? parseInt(row[1].toString()) : 0,
       }
     }
     return cashflowData
   }
 
   async getChangeStatement() {
+    if (this.sheetIndex.GENERAL === 0) await this.initSheetIndex()
     const changeStatementData: Record<string, Record<string, Record<'previous' | 'current', number>>> = {}
-    const previousRows = await readXlsxFile(this.path, { sheet: sheetIndex.PREVIOUSCHANGESTATEMENT })
+    const previousRows = await readXlsxFile(this.path, { sheet: this.sheetIndex.PREVIOUSCHANGESTATEMENT })
     const langIdx = this.lang === 'en' ? 6 : 5
     if (this.lang === 'id') previousRows.splice(langIdx + 1, 1)
     const prevKeys: string[] = []
@@ -129,7 +150,7 @@ class ReadFinancial {
       }
     }
 
-    const currentRows = await readXlsxFile(this.path, { sheet: sheetIndex.CURRENTCHANGESTATEMENT })
+    const currentRows = await readXlsxFile(this.path, { sheet: this.sheetIndex.CURRENTCHANGESTATEMENT })
     if (this.lang === 'id') currentRows.splice(langIdx + 1, 1)
     const currentKeys: string[] = []
     for (const [rowIdx, currentRow] of currentRows.slice(langIdx).entries()) {
